@@ -173,13 +173,16 @@ func (r *DockerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalMachine")
 	}
 
-	// Create a helper for managing a docker container hosting the loadbalancer.
-	// NB. the machine controller has to manage the cluster load balancer because the current implementation of the
-	// docker load balancer does not support auto-discovery of control plane nodes, so CAPD should take care of
-	// updating the cluster load balancer configuration when control plane machines are added/removed
-	externalLoadBalancer, err := docker.NewLoadBalancer(ctx, cluster, dockerCluster)
-	if err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalLoadBalancer")
+	var externalLoadBalancer *docker.LoadBalancer
+	if dockerCluster.Spec.LoadBalancer.Disable {
+		// Create a helper for managing a docker container hosting the loadbalancer.
+		// NB. the machine controller has to manage the cluster load balancer because the current implementation of the
+		// docker load balancer does not support auto-discovery of control plane nodes, so CAPD should take care of
+		// updating the cluster load balancer configuration when control plane machines are added/removed
+		externalLoadBalancer, err = docker.NewLoadBalancer(ctx, cluster, dockerCluster)
+		if err != nil {
+			return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalLoadBalancer")
+		}
 	}
 
 	// Handle deleted machines
@@ -480,6 +483,10 @@ func (r *DockerMachineReconciler) reconcileDelete(ctx context.Context, cluster *
 }
 
 func (r *DockerMachineReconciler) reconcileLoadBalancerConfiguration(ctx context.Context, cluster *clusterv1.Cluster, dockerCluster *infrav1.DockerCluster, externalLoadBalancer *docker.LoadBalancer) error {
+	if dockerCluster.Spec.LoadBalancer.Disable {
+		return nil
+	}
+
 	controlPlaneWeight := map[string]int{}
 
 	controlPlaneMachineList := &clusterv1.MachineList{}
@@ -505,6 +512,7 @@ func (r *DockerMachineReconciler) reconcileLoadBalancerConfiguration(ctx context
 	if err := externalLoadBalancer.UpdateConfiguration(ctx, controlPlaneWeight, unsafeLoadBalancerConfigTemplate); err != nil {
 		return errors.Wrap(err, "failed to update DockerCluster.loadbalancer configuration")
 	}
+
 	return nil
 }
 
